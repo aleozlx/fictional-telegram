@@ -144,11 +144,11 @@ with seeded_session():
 
 import pickle
 
-with open('metrics.dump', 'wb') as f:
+with open('metrics2.dump', 'wb') as f:
     data = (loss, acc, vacc)
     pickle.dump(data, f)
 
-with open('weights.dump', 'wb') as f:
+with open('weights2.dump', 'wb') as f:
     data = (W_conv, W_out)
     pickle.dump(data, f)
 
