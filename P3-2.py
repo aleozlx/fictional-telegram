@@ -33,7 +33,8 @@ def one_hot(d):
 print(X_train.shape, X_test.shape)
 
 W_conv = np.zeros((16, (7+21)*7+1))
-W_out = np.empty((10, 22*22*16+1))
+W_fc = np.empty((128, 22*22*16+1))
+W_out = np.empty((10, 128+1))
 
 class seeded_session:
     def __enter__(self):
@@ -43,6 +44,7 @@ class seeded_session:
         padded_weights[:, :, :7] = np.random.rand(16, 7, 7)*1e-4
         padded_weights[:, :, 7:] = 0#np.random.rand(16, 7, 1)*1e-4
         W_conv[:, -1:] = np.random.rand(16, 1)*1e-5
+        W_fc[:] = np.random.rand(*W_fc.shape)*1e-3 # !!! WTF
         W_out[:] = np.random.rand(*W_out.shape)
         return W_conv, W_out
     def __exit__(self, type, value, traceback):
@@ -73,30 +75,33 @@ def perceptron(w):
 
 conv_filters = [conv7(w) for w in W_conv]
 conv_layer = lambda x: np.array([f(x) for f in conv_filters])
+
+fc_neurons = [perceptron(w) for w in W_fc]
+fc_layer = lambda x: np.tanh([f(x.ravel()) for f in fc_neurons])
+
 output_neurons = [perceptron(w) for w in W_out]
-fc_layer = lambda x: softmax([f(x.ravel()) for f in output_neurons])
-model = lambda x: fc_layer(conv_layer(x))
+output_layer = lambda x: softmax([f(x) for f in output_neurons])
 
-with seeded_session():
-    for k in range(3):
-        plt.figure()
-        plt.imshow(X_train[k].reshape(28, 28).T)
-        print(model(X_train[k]), y_train[k])
-
+model = lambda x: output_layer(fc_layer(conv_layer(x)))
 
 # # Backward pass
 
 def train_one(x, d, alpha, verbose=False):
     y_conv = conv_layer(x) # shape: (filter, spatial) = (16, 22*22)
-    y_output = fc_layer(y_conv) # shape: (neuron, ) = (10, )
+    y_fc = fc_layer(y_conv) # shape: (neuron, ) = (128, )
+    y_output = output_layer(y_fc) # shape: (neuron, ) = (10, )
     e = one_hot(d) - y_output
     # delta_out.shape == y_output.shape
     delta_out = -e
-    # W_out.shape: (neuron: j, [out] weights+bias: i) = (10, 16*22*22+1)
-    update_out = -alpha * np.outer(delta_out, np.append(np.ravel(y_conv), 1.0))
+    # W_out.shape: (neuron: j, [out] weights+bias: i) = (10, 128+1)
+    update_out = -alpha * np.outer(delta_out, np.append(y_fc, 1.0))
+
+    delta_fc = np.dot(W_out[:, :-1].T, delta_out) * (1-y_fc**2) # shape: (128, )
+    update_fc = -alpha * np.outer(delta_fc, np.append(np.ravel(y_conv), 1.0))
+
     # delta_conv.shape == y_conv.shape
     #                        vvvv output weights without any bias
-    delta_conv = (np.dot(W_out[:, :-1].T, delta_out) * np.ravel(1-y_conv**2)).reshape(y_conv.shape)
+    delta_conv = (np.dot(W_fc[:, :-1].T, delta_fc) * np.ravel(1-y_conv**2)).reshape(y_conv.shape)
     # W_conv.shape: (filter, [conv] weights+bias) = (16, 7*(7+21)+1)
     update_conv = np.zeros((16, 7*7+1)) # vs (W_conv.shape) deal with padding when updating
     for idx_filter in range(update_conv.shape[0]):
@@ -108,8 +113,41 @@ def train_one(x, d, alpha, verbose=False):
         )
     if verbose:
         pprint({k:(v.ravel()[:5] if k.startswith('update') or k.startswith('delta') else v)
-            for k,v in locals().items() if k not in set(['x'])})
+            for k,v in locals().items() if k not in set(['x', 'y_conv', 'y_fc'])})
     return {k:v for k,v in locals().items() if k not in set(['x', 'y_conv'])}
+
+with seeded_session():
+    train_one(X_train[0], y_train[0], 0.2, verbose=True)
+
+def autograd(params, f, truncate=False):
+    epsilon = 1e-6
+    backup = params.copy().ravel()
+    grad = np.empty(params.shape)
+    for i in (range(min(5, len(backup))) if truncate else range(len(backup))):
+        params.flat[i] = backup[i] + epsilon
+        f1 = f()
+        params.flat[i] = backup[i] - epsilon
+        f2 = f()
+        grad.flat[i] = (f1-f2)/(epsilon*2.0)
+        params.flat[i] = backup.flat[i]
+    if truncate:
+        return grad.ravel()[:5]
+    else:
+        return grad
+
+def train_one_autodiff(x, d, alpha):
+    loss = lambda x, d: -np.sum(one_hot(d)*np.log(model(x)))
+    loss_op = lambda: loss(x, d)
+    update_out = -alpha * autograd(W_out, loss_op, truncate=True)
+    update_fc = -alpha * autograd(W_fc, loss_op, truncate=True)
+    update_conv = -alpha * autograd(W_conv, loss_op, truncate=True)
+    return {k:(v.ravel()[:5] if k.startswith('update') else v)
+            for k,v in locals().items() if k not in set(['x', 'loss'])}
+
+with seeded_session():
+    print(train_one_autodiff(X_train[0], y_train[0], 0.2))
+
+#sys.exit(0)
 
 loss = []
 acc = []
@@ -125,10 +163,10 @@ with seeded_session():
             v = train_one(X_train[k], y_train[k], 0.0001)
             epoch_loss.append(-np.sum(one_hot(y_train[k])*np.log(v['y_output'])))
             epoch_acc.append(np.argmax(v['y_output']) == y_train[k])
-#             W_conv += v['update_conv']
             padded_weights = W_conv[:, :-1].reshape((-1, 7, 28))
             padded_weights[:, :, :7] += v['update_conv'][:,:-1].reshape((-1,7,7))
             W_conv[:, -1] += v['update_conv'][:,-1]
+            W_fc += v['update_fc']
             W_out += v['update_out']
         acc.append(np.mean(epoch_acc))
         loss.append(np.mean(epoch_loss))
@@ -149,23 +187,5 @@ with open('metrics2.dump', 'wb') as f:
     pickle.dump(data, f)
 
 with open('weights2.dump', 'wb') as f:
-    data = (W_conv, W_out)
+    data = (W_conv, W_fc, W_out)
     pickle.dump(data, f)
-
-sys.exit(0)
-plt.plot(list(range(epochs)), loss)
-
-
-plt.plot(list(range(epochs)), acc, label='acc')
-plt.plot(list(range(epochs)), vacc, label='vacc')
-plt.legend()
-
-
-# In[ ]:
-
-for i in range(W_conv.shape[0]):
-    fig = plt.figure()
-    plt.imshow(W_conv[i, :-1].reshape((7, 28))[:, :7].reshape(7, 7).T)
-    plt.colorbar()
-    plt.show()
-    plt.close(fig)
