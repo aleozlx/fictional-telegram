@@ -19,7 +19,7 @@ def mnist_decoder(csv_line, label):
         fields = tf.decode_csv(csv_line, FIELD_DEFAULTS)
         im = tf.stack(fields)
         im = tf.reshape(im, (28, 28, 1))
-        return im, tf.one_hot(label, depth=10)
+        return im[:14, :14, :], im[:14, 14:, :] ,im[14:, :14, :], im[14:, 14:, :], tf.one_hot(label, depth=10)
 
 tf.reset_default_graph()
 
@@ -46,22 +46,37 @@ with tf.variable_scope('DataSource'):
     train_iterator = dataset.make_one_shot_iterator()
     val_iterator = dataset_val.make_initializable_iterator()
     val_init_op = data_iterator.make_initializer(dataset_val)
-    images, onehot_labels = data_iterator.get_next()
+    im1, im2, im3, im4, onehot_labels = data_iterator.get_next()
 
 with tf.variable_scope('CNN'):
-    convmaps = tf.keras.layers.Conv2D(16, (7,7), activation='tanh')(images)
-    # features = tf.reshape(convmaps, (batch_size, 16*22*22))
-    # fc1 = tf.keras.layers.Dense(128, activation='tanh')(features)
-    # pred = tf.keras.layers.Dense(10)(features)
-
+    conv77 = tf.keras.layers.Conv2D(16, (7,7), activation='sigmoid')
+    cm1 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im1))
+    cm2 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im2))
+    cm3 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im3))
+    cm4 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im4))
+    features = tf.keras.layers.Concatenate()([cm1, cm2, cm3, cm4])
+    features = tf.transpose(tf.reshape(features, [-1, 4, 16, 1]), [0, 2, 1, 3])
+# with tf.Session() as sess:    
+#     sess.run(tf.global_variables_initializer())
+#     train_handle = sess.run(train_iterator.string_handle())
+#     print(sess.run(tf.shape(features), feed_dict={iter_handle: train_handle}))
+#     for epoch in range(epochs):
+#         for step in tqdm(range(steps_per_epoch)):
+#             sess.run([features, onehot_labels],
+#                      feed_dict={iter_handle: train_handle})
+# sys.exit()
 from capsLayer import CapsLayer
 
-with tf.variable_scope('CapsNet'):
-    primaryCaps = CapsLayer(num_outputs=32, vec_len=8, iter_routing=0, batch_size=batch_size, input_shape=(batch_size, 16, 22, 22), layer_type='CONV')
-    caps1 = primaryCaps(convmaps, kernel_size=9, stride=2)
+# with tf.variable_scope('QuadrantCaps'):
+#     quadrantCaps = CapsLayer(num_outputs=32, vec_len=8, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 16, 4, 1), layer_type='FC')
+#     caps1 = quadrantCaps(features, kernel_size=8, stride=1)
+# with tf.variable_scope('ClassCaps'):
+#     digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 32, 8, 1), layer_type='FC')
+#     caps2 = digitCaps(caps1)
 
-    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 1568, 8, 1), layer_type='FC')
-    caps2 = digitCaps(caps1)
+with tf.variable_scope('ClassCaps'):
+    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 16, 4, 1), layer_type='FC')
+    caps2 = digitCaps(features)
 
 ctx_batch_size = batch_size
 ctx_nclasses = 10
@@ -90,8 +105,8 @@ with tf.variable_scope('Loss'):
 
 with tf.variable_scope('Optimizer'):
     global_step = tf.Variable(0)
-    # optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
-    optimizer = tf.train.AdamOptimizer(learning_rate=0.0001)
+    optimizer = tf.train.MomentumOptimizer(0.01, 0.9)
+    # optimizer = tf.train.AdamOptimizer(learning_rate=0.0001)
     train_op = optimizer.minimize(total_loss, global_step)
 
 with tf.variable_scope('Metrics'):
