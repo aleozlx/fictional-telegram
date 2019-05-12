@@ -2,7 +2,7 @@ import os, sys
 from tqdm import tqdm
 import tensorflow as tf
 
-epochs = 50
+epochs = 20
 batch_size = 200
 steps_per_epoch = 5000//batch_size
 summary = True
@@ -49,13 +49,19 @@ with tf.variable_scope('DataSource'):
     im1, im2, im3, im4, onehot_labels = data_iterator.get_next()
 
 with tf.variable_scope('CNN'):
-    conv77 = tf.keras.layers.Conv2D(16, (7,7), activation='sigmoid')
-    cm1 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im1))
-    cm2 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im2))
-    cm3 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im3))
-    cm4 = tf.keras.layers.GlobalAveragePooling2D()(conv77(im4))
-    features = tf.keras.layers.Concatenate()([cm1, cm2, cm3, cm4])
-    features = tf.transpose(tf.reshape(features, [-1, 4, 16, 1]), [0, 2, 1, 3])
+    conv77 = tf.keras.layers.Conv2D(16, (7,7), activation='relu')
+    # cm1 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im1))
+    # cm2 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im2))
+    # cm3 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im3))
+    # cm4 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im4))
+    # features = tf.keras.layers.Concatenate()([cm1, cm2, cm3, cm4])
+    # features = tf.transpose(tf.reshape(features, [-1, 4, 8, 1]), [0, 2, 1, 3])
+
+    convmaps = [
+        tf.transpose(tf.reshape(conv77(im), [-1, 8, 8, 16]), [0, 3, 1, 2])
+            for im in [im1, im2, im3, im4]
+    ]
+
 # with tf.Session() as sess:    
 #     sess.run(tf.global_variables_initializer())
 #     train_handle = sess.run(train_iterator.string_handle())
@@ -67,16 +73,19 @@ with tf.variable_scope('CNN'):
 # sys.exit()
 from capsLayer import CapsLayer
 
-# with tf.variable_scope('QuadrantCaps'):
-#     quadrantCaps = CapsLayer(num_outputs=32, vec_len=8, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 16, 4, 1), layer_type='FC')
-#     caps1 = quadrantCaps(features, kernel_size=8, stride=1)
-# with tf.variable_scope('ClassCaps'):
-#     digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 32, 8, 1), layer_type='FC')
-#     caps2 = digitCaps(caps1)
-
+with tf.variable_scope('QuadrantCaps'):
+    l1caps = []
+    for cm in convmaps:
+        quadrantCaps = CapsLayer(num_outputs=1, vec_len=8, iter_routing=0, batch_size=batch_size, input_shape=(batch_size, 16, 8, 8), layer_type='CONV')
+        l1caps.append(quadrantCaps(cm, kernel_size=8, stride=1))
+    caps1 = tf.keras.layers.Concatenate(axis=1)(l1caps)
 with tf.variable_scope('ClassCaps'):
-    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 16, 4, 1), layer_type='FC')
-    caps2 = digitCaps(features)
+    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 36, 8, 1), layer_type='FC')
+    caps2 = digitCaps(caps1)
+
+# with tf.variable_scope('ClassCaps'):
+#     digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=3, batch_size=batch_size, input_shape=(batch_size, 8, 4, 1), layer_type='FC')
+#     caps2 = digitCaps(features)
 
 ctx_batch_size = batch_size
 ctx_nclasses = 10
@@ -105,8 +114,9 @@ with tf.variable_scope('Loss'):
 
 with tf.variable_scope('Optimizer'):
     global_step = tf.Variable(0)
-    optimizer = tf.train.MomentumOptimizer(0.01, 0.9)
-    # optimizer = tf.train.AdamOptimizer(learning_rate=0.0001)
+    # optimizer = tf.train.GradientDescentOptimizer(0.01)
+    # optimizer = tf.train.MomentumOptimizer(0.01, 0.9)
+    optimizer = tf.train.AdamOptimizer(learning_rate=0.0001)
     train_op = optimizer.minimize(total_loss, global_step)
 
 with tf.variable_scope('Metrics'):
@@ -134,6 +144,7 @@ config = tf.ConfigProto(
 with tf.Session(config = config) as sess:
     sess.run(init_global)
     train_handle = sess.run(train_iterator.string_handle())
+    # print(sess.run(tf.shape(caps1), feed_dict={iter_handle: train_handle}))
     val_handle = sess.run(val_iterator.string_handle())
     for epoch in range(epochs):
         sess.run(init_local)
