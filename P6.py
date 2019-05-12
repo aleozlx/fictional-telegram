@@ -50,27 +50,11 @@ with tf.variable_scope('DataSource'):
 
 with tf.variable_scope('CNN'):
     conv77 = tf.keras.layers.Conv2D(16, (7,7), activation='relu')
-    # cm1 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im1))
-    # cm2 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im2))
-    # cm3 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im3))
-    # cm4 = tf.keras.layers.GlobalAveragePooling2D()(tf.keras.layers.Conv2D(8, (7,7), activation='sigmoid')(im4))
-    # features = tf.keras.layers.Concatenate()([cm1, cm2, cm3, cm4])
-    # features = tf.transpose(tf.reshape(features, [-1, 4, 8, 1]), [0, 2, 1, 3])
-
     convmaps = [
         tf.transpose(tf.reshape(conv77(im), [-1, 8, 8, 16]), [0, 3, 1, 2])
             for im in [im1, im2, im3, im4]
     ]
 
-# with tf.Session() as sess:    
-#     sess.run(tf.global_variables_initializer())
-#     train_handle = sess.run(train_iterator.string_handle())
-#     print(sess.run(tf.shape(features), feed_dict={iter_handle: train_handle}))
-#     for epoch in range(epochs):
-#         for step in tqdm(range(steps_per_epoch)):
-#             sess.run([features, onehot_labels],
-#                      feed_dict={iter_handle: train_handle})
-# sys.exit()
 from capsLayer import CapsLayer
 
 with tf.variable_scope('QuadrantCaps'):
@@ -82,10 +66,6 @@ with tf.variable_scope('QuadrantCaps'):
 with tf.variable_scope('ClassCaps'):
     digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 36, 8, 1), layer_type='FC')
     caps2 = digitCaps(caps1)
-
-# with tf.variable_scope('ClassCaps'):
-#     digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=3, batch_size=batch_size, input_shape=(batch_size, 8, 4, 1), layer_type='FC')
-#     caps2 = digitCaps(features)
 
 ctx_batch_size = batch_size
 ctx_nclasses = 10
