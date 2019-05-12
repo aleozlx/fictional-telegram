@@ -1,8 +1,9 @@
+import os, sys
 from tqdm import tqdm
 import tensorflow as tf
 
 epochs = 50
-batch_size = 500
+batch_size = 200
 steps_per_epoch = 5000//batch_size
 summary = True
 
@@ -49,22 +50,53 @@ with tf.variable_scope('DataSource'):
 
 with tf.variable_scope('CNN'):
     convmaps = tf.keras.layers.Conv2D(16, (7,7), activation='tanh')(images)
-    features = tf.reshape(convmaps, (batch_size, 16*22*22))
-    fc1 = tf.keras.layers.Dense(128, activation='tanh')(features)
-    pred = tf.keras.layers.Dense(10)(features)
+    # features = tf.reshape(convmaps, (batch_size, 16*22*22))
+    # fc1 = tf.keras.layers.Dense(128, activation='tanh')(features)
+    # pred = tf.keras.layers.Dense(10)(features)
 
-with tf.variable_scope('LossFn'):
-   total_loss = tf.nn.softmax_cross_entropy_with_logits_v2(onehot_labels, pred)
+from capsLayer import CapsLayer
+
+with tf.variable_scope('CapsNet'):
+    primaryCaps = CapsLayer(num_outputs=32, vec_len=8, iter_routing=0, batch_size=batch_size, input_shape=(batch_size, 16, 22, 22), layer_type='CONV')
+    caps1 = primaryCaps(convmaps, kernel_size=9, stride=2)
+
+    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 1568, 8, 1), layer_type='FC')
+    caps2 = digitCaps(caps1)
+
+ctx_batch_size = batch_size
+ctx_nclasses = 10
+ctx_lambda_val = 0.5
+ctx_m_plus = 0.9
+ctx_m_minus = 0.1
+
+with tf.variable_scope('Masking'):
+    epsilon = 1e-9
+    v_length = tf.sqrt(tf.reduce_sum(tf.square(caps2),
+                                        axis=2, keepdims=True) + epsilon)
+    softmax_v = tf.nn.softmax(v_length, axis=1)
+    argmax_idx = tf.to_int32(tf.argmax(softmax_v, axis=1))
+    argmax_idx = tf.reshape(argmax_idx, shape=(ctx_batch_size, ))
+    masked_v = tf.multiply(tf.squeeze(caps2), tf.reshape(onehot_labels, (-1, ctx_nclasses, 1)))
+    v_length = tf.sqrt(tf.reduce_sum(tf.square(caps2), axis=2, keepdims=True) + epsilon)
+
+    with tf.variable_scope('Loss'):
+        max_l = tf.square(tf.maximum(0., ctx_m_plus - v_length))
+        max_r = tf.square(tf.maximum(0., v_length - ctx_m_minus))
+        max_l = tf.reshape(max_l, shape=(ctx_batch_size, -1))
+        max_r = tf.reshape(max_r, shape=(ctx_batch_size, -1))
+        L_c = onehot_labels * max_l + ctx_lambda_val * (1 - onehot_labels) * max_r
+        margin_loss = tf.reduce_mean(tf.reduce_sum(L_c, axis=1))
+        total_loss = margin_loss
 
 with tf.variable_scope('Optimizer'):
     global_step = tf.Variable(0)
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
-    # optimizer = tf.train.AdamOptimizer(learning_rate=0.0001)
+    # optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
+    optimizer = tf.train.AdamOptimizer(learning_rate=0.0001)
     train_op = optimizer.minimize(total_loss, global_step)
 
 with tf.variable_scope('Metrics'):
     labels = tf.to_int32(tf.argmax(onehot_labels, axis=1))
-    argmax_idx = tf.to_int32(tf.argmax(pred, axis=1))
+    # argmax_idx = tf.to_int32(tf.argmax(pred, axis=1))
     epoch_loss_avg, epoch_loss_avg_update = tf.metrics.mean(total_loss)
     epoch_accuracy, epoch_accuracy_update = tf.metrics.accuracy(labels, argmax_idx)
     if summary:
@@ -80,8 +112,8 @@ with tf.variable_scope('Initializer'):
     init_local = tf.local_variables_initializer()
 
 config = tf.ConfigProto(
-    intra_op_parallelism_threads=2,
-    inter_op_parallelism_threads=2,
+    # intra_op_parallelism_threads=2,
+    # inter_op_parallelism_threads=2,
     allow_soft_placement=True)
 
 with tf.Session(config = config) as sess:
@@ -96,7 +128,7 @@ with tf.Session(config = config) as sess:
                       epoch_loss_avg_update,
                       epoch_accuracy_update],
                      feed_dict={iter_handle: train_handle})
-        print('epoch', epoch+1, 'acc', sess.run(epoch_accuracy), end=' ')
+        print('epoch', epoch+1, 'acc', sess.run(epoch_accuracy), 'loss', sess.run(epoch_loss_avg), end=' ')
 
         sess.run([init_local, val_init_op], feed_dict={iter_handle: val_handle})
         for val_step in range(steps_per_epoch):
