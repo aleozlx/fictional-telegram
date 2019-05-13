@@ -1,3 +1,4 @@
+import os
 from tqdm import tqdm
 import tensorflow as tf
 
@@ -75,6 +76,11 @@ with tf.variable_scope('Metrics'):
         summary_train = tf.summary.merge([summary_loss, summary_acc])
         summary_val = tf.summary.merge([summary_vloss, summary_vacc])
 
+if summary:
+    run_dir = os.path.join('/tmp/logdir', 'cnn-mlp')
+    if not os.path.exists(run_dir):
+        os.mkdir(run_dir)
+
 with tf.variable_scope('Initializer'):
     init_global = tf.global_variables_initializer()
     init_local = tf.local_variables_initializer()
@@ -88,6 +94,10 @@ with tf.Session(config = config) as sess:
     sess.run(init_global)
     train_handle = sess.run(train_iterator.string_handle())
     val_handle = sess.run(val_iterator.string_handle())
+
+    if summary:
+        summary_writer = tf.summary.FileWriter(run_dir, sess.graph)
+
     for epoch in range(epochs):
         sess.run(init_local)
         for step in tqdm(range(steps_per_epoch)):
@@ -96,6 +106,10 @@ with tf.Session(config = config) as sess:
                       epoch_loss_avg_update,
                       epoch_accuracy_update],
                      feed_dict={iter_handle: train_handle})
+            if summary:
+                summary = sess.run(summary_train)
+        if summary:
+            summary_writer.add_summary(summary, epoch)
         print('epoch', epoch+1, 'acc', sess.run(epoch_accuracy), end=' ')
 
         sess.run([init_local, val_init_op], feed_dict={iter_handle: val_handle})
@@ -104,5 +118,9 @@ with tf.Session(config = config) as sess:
                       epoch_loss_avg_update,
                       epoch_accuracy_update],
                      feed_dict={iter_handle: val_handle})
+            if summary:
+                summary = sess.run(summary_val)
+        if summary:
+            summary_writer.add_summary(summary, epoch)
         print('vacc', sess.run(epoch_accuracy))
 

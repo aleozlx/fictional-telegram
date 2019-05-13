@@ -2,10 +2,11 @@ import os, sys
 from tqdm import tqdm
 import tensorflow as tf
 
-epochs = 20
+epochs = 50
 batch_size = 200
 steps_per_epoch = 5000//batch_size
 summary = True
+iter_routing = 1
 
 def mnist_reader(part):
     for i in range(10):
@@ -68,7 +69,7 @@ with tf.variable_scope('QuadrantCaps'):
         l1caps.append(quadrantCaps(cm, kernel_size=7, stride=1))
     caps1 = tf.keras.layers.Concatenate(axis=1)(l1caps)
 with tf.variable_scope('ClassCaps'):
-    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 16, 8, 1), layer_type='FC')
+    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=iter_routing, batch_size=batch_size, input_shape=(batch_size, 16, 8, 1), layer_type='FC')
     caps2 = digitCaps(caps1)
 
 ctx_batch_size = batch_size
@@ -116,6 +117,11 @@ with tf.variable_scope('Metrics'):
         summary_train = tf.summary.merge([summary_loss, summary_acc])
         summary_val = tf.summary.merge([summary_vloss, summary_vacc])
 
+if summary:
+    run_dir = os.path.join('/tmp/logdir', 'quadcaps-{}'.format(iter_routing))
+    if not os.path.exists(run_dir):
+        os.mkdir(run_dir)
+
 with tf.variable_scope('Initializer'):
     init_global = tf.global_variables_initializer()
     init_local = tf.local_variables_initializer()
@@ -130,6 +136,10 @@ with tf.Session(config = config) as sess:
     train_handle = sess.run(train_iterator.string_handle())
     # print(sess.run(tf.shape(caps1), feed_dict={iter_handle: train_handle}))
     val_handle = sess.run(val_iterator.string_handle())
+
+    if summary:
+        summary_writer = tf.summary.FileWriter(run_dir, sess.graph)
+
     for epoch in range(epochs):
         sess.run(init_local)
         for step in tqdm(range(steps_per_epoch)):
@@ -138,6 +148,10 @@ with tf.Session(config = config) as sess:
                       epoch_loss_avg_update,
                       epoch_accuracy_update],
                      feed_dict={iter_handle: train_handle})
+            if summary:
+                summary = sess.run(summary_train)
+        if summary:
+            summary_writer.add_summary(summary, epoch)
         print('epoch', epoch+1, 'acc', sess.run(epoch_accuracy), 'loss', sess.run(epoch_loss_avg), end=' ')
 
         sess.run([init_local, val_init_op], feed_dict={iter_handle: val_handle})
@@ -146,5 +160,12 @@ with tf.Session(config = config) as sess:
                       epoch_loss_avg_update,
                       epoch_accuracy_update],
                      feed_dict={iter_handle: val_handle})
+            if summary:
+                summary = sess.run(summary_val)
+        if summary:
+            summary_writer.add_summary(summary, epoch)
         print('vacc', sess.run(epoch_accuracy))
+    with tf.variable_scope('ModelSaver'):
+        saver = tf.train.Saver(tf.trainable_variables())
+        saver.save(sess, os.path.join(run_dir, 'model'))
 
