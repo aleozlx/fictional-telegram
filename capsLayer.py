@@ -149,8 +149,79 @@ def routing(input, b_IJ, iter_routing, num_outputs=10, num_dims=16):
                 # b_IJ += tf.reduce_sum(u_produce_v, axis=0, keep_dims=True)
                 b_IJ += u_produce_v
 
-    return(v_J)
+    return v_J
 
+# import tensorflow.contrib.slim as slim
+# # def routing(input, b_IJ, iter_routing, num_outputs=10, num_dims=16):
+# cfg_ac_lambda0 = 0.01
+# def em_routing(votes, activation, iter_routing, num_outputs, num_dims):
+#     weights_regularizer = tf.contrib.layers.l2_regularizer(5e-04)
+#     test = []
+
+#     batch_size = int(votes.get_shape()[0])
+#     caps_num_i = int(activation.get_shape()[1])
+#     n_channels = int(votes.get_shape()[-1])
+
+#     sigma_square = []
+#     miu = []
+#     activation_out = []
+#     beta_v = slim.variable('beta_v', shape=[num_outputs, n_channels], dtype=tf.float32,
+#                            initializer=tf.constant_initializer(0.0),#tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
+#                            regularizer=weights_regularizer)
+#     beta_a = slim.variable('beta_a', shape=[num_outputs], dtype=tf.float32,
+#                            initializer=tf.constant_initializer(0.0),#tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
+#                            regularizer=weights_regularizer)
+
+#     # votes_in = tf.stop_gradient(votes, name='stop_gradient_votes')
+#     # activation_in = tf.stop_gradient(activation, name='stop_gradient_activation')
+#     votes_in = votes
+#     activation_in = activation
+
+#     for iters in range(iter_routing):
+#         # if iters == cfg.iter_routing-1:
+
+#         # e-step
+#         if iters == 0:
+#             r = tf.constant(np.ones([batch_size, caps_num_i, num_outputs], dtype=np.float32) / num_outputs)
+#         else:
+#             # Contributor: Yunzhi Shi
+#             # log and exp here provide higher numerical stability especially for bigger number of iterations
+#             log_p_c_h = -tf.log(tf.sqrt(sigma_square)) - \
+#                         (tf.square(votes_in - miu) / (2 * sigma_square))
+#             log_p_c_h = log_p_c_h - \
+#                         (tf.reduce_max(log_p_c_h, axis=[2, 3], keep_dims=True) - tf.log(10.0))
+#             p_c = tf.exp(tf.reduce_sum(log_p_c_h, axis=3))
+
+#             ap = p_c * tf.reshape(activation_out, shape=[batch_size, 1, num_outputs])
+
+#             # ap = tf.reshape(activation_out, shape=[batch_size, 1, num_outputs])
+
+#             r = ap / (tf.reduce_sum(ap, axis=2, keep_dims=True) + epsilon)
+
+#         # m-step
+#         r = r * tf.reshape(activation_in, tf.shape(r))
+#         r = r / (tf.reduce_sum(r, axis=2, keep_dims=True)+epsilon)
+
+#         r_sum = tf.reduce_sum(r, axis=1, keep_dims=True)
+#         r1 = tf.reshape(r / (r_sum + epsilon),
+#                         shape=[batch_size, caps_num_i, num_outputs, 1])
+
+#         miu = tf.reduce_sum(votes_in * r1, axis=1, keep_dims=True)
+#         sigma_square = tf.reduce_sum(tf.square(votes_in - miu) * r1,
+#                                      axis=1, keep_dims=True) + epsilon
+
+#         if iters == iter_routing-1:
+#             r_sum = tf.reshape(r_sum, [batch_size, num_outputs, 1])
+#             cost_h = (beta_v + tf.log(tf.sqrt(tf.reshape(sigma_square,
+#                                                          shape=[batch_size, num_outputs, n_channels])))) * r_sum
+
+#             activation_out = tf.nn.softmax(cfg_ac_lambda0 * (beta_a - tf.reduce_sum(cost_h, axis=2)))
+#         else:
+#             activation_out = tf.nn.softmax(r_sum)
+#         # if iters <= cfg.iter_routing-1:
+#         #     activation_out = tf.stop_gradient(activation_out, name='stop_gradient_activation')
+#     return activation_out
+#     # return miu, activation_out, test
 
 def squash(vector):
     vec_squared_norm = tf.reduce_sum(tf.square(vector), -2, keepdims=True)
