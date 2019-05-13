@@ -50,8 +50,12 @@ with tf.variable_scope('DataSource'):
 
 with tf.variable_scope('CNN'):
     conv77 = tf.keras.layers.Conv2D(16, (7,7), activation='relu')
+    # convmaps = [
+    #     tf.transpose(tf.reshape(conv77(im), [-1, 8, 8, 16]), [0, 3, 1, 2])
+    #         for im in [im1, im2, im3, im4]
+    # ]
     convmaps = [
-        tf.transpose(tf.reshape(conv77(im), [-1, 8, 8, 16]), [0, 3, 1, 2])
+        conv77(im)
             for im in [im1, im2, im3, im4]
     ]
 
@@ -61,10 +65,10 @@ with tf.variable_scope('QuadrantCaps'):
     l1caps = []
     for cm in convmaps:
         quadrantCaps = CapsLayer(num_outputs=1, vec_len=8, iter_routing=0, batch_size=batch_size, input_shape=(batch_size, 16, 8, 8), layer_type='CONV')
-        l1caps.append(quadrantCaps(cm, kernel_size=8, stride=1))
+        l1caps.append(quadrantCaps(cm, kernel_size=7, stride=1))
     caps1 = tf.keras.layers.Concatenate(axis=1)(l1caps)
 with tf.variable_scope('ClassCaps'):
-    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 36, 8, 1), layer_type='FC')
+    digitCaps = CapsLayer(num_outputs=10, vec_len=16, iter_routing=1, batch_size=batch_size, input_shape=(batch_size, 16, 8, 1), layer_type='FC')
     caps2 = digitCaps(caps1)
 
 ctx_batch_size = batch_size
