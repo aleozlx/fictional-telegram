@@ -2,7 +2,7 @@ import os, sys
 from tqdm import tqdm
 import tensorflow as tf
 
-batch_size = 200
+batch_size = 20
 steps_per_epoch = 5000//batch_size
 summary = True
 iter_routing = 3
@@ -98,9 +98,9 @@ config = tf.ConfigProto(
     # inter_op_parallelism_threads=2,
     allow_soft_placement=True)
 
-# from tensorflow.python import debug as tf_debug
+from tensorflow.python import debug as tf_debug
 with tf.Session(config = config) as sess:
-    # sess = tf_debug.TensorBoardDebugWrapperSession(sess, 'localhost:7000')
+    sess = tf_debug.TensorBoardDebugWrapperSession(sess, 'localhost:7000')
     saver.restore(sess, os.path.join(run_dir, 'model'))
     val_handle = sess.run(val_iterator.string_handle())
 
